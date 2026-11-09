@@ -1,0 +1,29 @@
+# Remote (Railway) image: Streamable HTTP behind a secret URL path.
+# Build:  docker build -f Dockerfile.remote -t icu-mcp-remote .
+# Run:    docker run --rm -p 8000:8000 --env-file .env -e MCP_PATH_SECRET=... icu-mcp-remote
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
+
+FROM python:3.14-slim AS builder
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /app
+# Version normally comes from git via hatch-vcs; .git is not in the build context.
+ARG PKG_VERSION=0.0.0+remote
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=$PKG_VERSION
+COPY pyproject.toml uv.lock* README.md ./
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev
+
+FROM python:3.14-slim
+WORKDIR /app
+COPY --from=builder /app/.venv /app/.venv
+COPY src/ ./src/
+COPY pyproject.toml ./
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Europe/Amsterdam \
+    INTERVALS_ICU_DELETE_MODE=none
+RUN useradd --system --no-create-home app
+USER app
+# Railway injects PORT; secrets (API key, athlete id, MCP_PATH_SECRET) come from env only.
+ENTRYPOINT ["python", "-m", "intervals_icu_mcp.remote"]
